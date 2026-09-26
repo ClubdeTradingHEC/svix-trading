@@ -10,7 +10,7 @@ import numpy as np
 from src.core.schemas import OptionChain, VolatilityMetrics
 
 
-class VariancePremiumCalculator:
+class VarianceCalculator:
     """
     Mathematical engine responsible for computing implied variance from option surfaces.
     Handles Out-of-the-Money (OTM) filtration, numerical integration, and constant-maturity interpolation.
