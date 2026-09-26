@@ -5,7 +5,6 @@ from src.core.schemas import TradeSignal
 
 
 def test_imports():
-    """Vérifie que tous les modules sont détectés par Python."""
     modules = [
         "src.core",
         "src.data",
@@ -18,6 +17,5 @@ def test_imports():
 
 
 def test_schemas_loading():
-    """Vérifie que les dataclasses sont correctement formatées."""
     signal = TradeSignal(date=datetime(2026, 9, 25), target_weight=0.5, signal_confidence=1.2)
     assert signal.target_weight == 0.5
