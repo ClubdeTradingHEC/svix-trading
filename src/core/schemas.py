@@ -13,6 +13,7 @@ import pandas as pd
 
 class OptionType(str, Enum):
     """Enumeration for option types."""
+
     CALL = "C"
     PUT = "P"
 
@@ -23,6 +24,7 @@ class OptionChain:
     Immutable volatility surface for a single maturity.
     Note: Analytics pipeline may require List[OptionChain] for constant maturity interpolation.
     """
+
     date: datetime
     maturity_days: float
     underlying_price: float
@@ -36,11 +38,11 @@ class OptionChain:
             raise ValueError(f"Invalid maturity: {self.maturity_days} days.")
         if self.options_data.empty:
             raise ValueError("Empty options data payload.")
-        
+
         required = {"strike", "option_type", "bid", "ask", "mid_price"}
         if missing := required - set(self.options_data.columns):
             raise ValueError(f"Missing columns: {missing}.")
-        
+
         if self.options_data[["strike", "mid_price"]].isnull().any().any():
             raise ValueError("NaN values detected in critical pricing columns.")
 
@@ -51,6 +53,7 @@ class VolatilityMetrics:
     Numerical integration results.
     Propagates underlying state (price, rates, dividends) required by Portfolio constraints.
     """
+
     date: datetime
     maturity_days: float
     is_interpolated: bool  # True if derived from two OptionChains (e.g., 30-day constant)
@@ -79,9 +82,10 @@ class VolatilityMetrics:
 class TradeSignal:
     """
     Target allocation vector for Delta-One S&P 500 trading.
-    Strictly separates signal generation timestamp from execution 
+    Strictly separates signal generation timestamp from execution
     timestamp to prevent look-ahead bias.
     """
+
     signal_date: datetime  # e.g., t (Market Close)
     target_execution_date: datetime  # e.g., t+1 (Market Open)
     underlying_price_at_signal: float
@@ -93,7 +97,7 @@ class TradeSignal:
     def __post_init__(self) -> None:
         if self.target_execution_date <= self.signal_date:
             raise ValueError("Execution date must be strictly after signal date (Look-ahead bias).")
-            
+
         if np.isnan(self.target_weight) or np.isinf(self.target_weight):
             raise ValueError("Target weight must be a finite number.")
 
