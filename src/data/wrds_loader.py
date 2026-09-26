@@ -21,9 +21,6 @@ class WRDSOptionLoader:
     def __init__(self) -> None:
         """
         Initializes the loader and the database connection.
-
-        Args:
-            wrds_username (str): The environment-injected WRDS username.
         """
         self._connection = None
         raise NotImplementedError("Nizar: Implement the wrds.Connection() logic here.")
