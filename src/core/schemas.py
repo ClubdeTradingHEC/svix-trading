@@ -1,6 +1,5 @@
 """
-Core Data Contracts for Drift & Diffusion Quantitative Pipeline.
-Resolves look-ahead bias, maturity interpolation, and context propagation.
+Core Data Contracts.
 """
 
 from dataclasses import dataclass
@@ -80,7 +79,8 @@ class VolatilityMetrics:
 class TradeSignal:
     """
     Target allocation vector for Delta-One S&P 500 trading.
-    Strictly separates signal generation timestamp from execution timestamp to prevent look-ahead bias.
+    Strictly separates signal generation timestamp from execution 
+    timestamp to prevent look-ahead bias.
     """
     signal_date: datetime  # e.g., t (Market Close)
     target_execution_date: datetime  # e.g., t+1 (Market Open)
