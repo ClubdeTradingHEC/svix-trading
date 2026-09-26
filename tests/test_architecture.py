@@ -1,17 +1,23 @@
+import importlib
+from datetime import datetime
+
+from src.core.schemas import TradeSignal
+
+
 def test_imports():
     """Vérifie que tous les modules sont détectés par Python."""
-    import src.data
-    import src.analytics
-    import src.signals
-    import src.portfolio
-
-    assert True
+    modules = [
+        "src.core",
+        "src.data",
+        "src.analytics",
+        "src.signals",
+        "src.portfolio",
+    ]
+    for mod in modules:
+        assert importlib.import_module(mod) is not None
 
 
 def test_schemas_loading():
     """Vérifie que les dataclasses sont correctement formatées."""
-    from src.core.schemas import TradeSignal
-    from datetime import datetime
-
     signal = TradeSignal(date=datetime(2026, 9, 25), target_weight=0.5, signal_confidence=1.2)
     assert signal.target_weight == 0.5

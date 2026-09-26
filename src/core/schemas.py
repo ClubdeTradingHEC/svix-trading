@@ -1,12 +1,13 @@
 from dataclasses import dataclass
 from datetime import datetime
+
 import pandas as pd
 
 
 @dataclass
 class OptionChain:
-    """
-    Contrat de données pour le poste Data (Nizar).
+    """Contrat de données pour le poste Data (Nizar).
+
     Représente la surface de volatilité filtrée pour une maturité donnée.
     """
 
@@ -23,8 +24,8 @@ class OptionChain:
 
 @dataclass
 class VolatilityMetrics:
-    """
-    Contrat de données pour le poste Analytics (Nelson).
+    """Contrat de données pour le poste Analytics (Nelson).
+
     Représente les résultats de l'intégration numérique.
     """
 
@@ -40,8 +41,8 @@ class VolatilityMetrics:
 
 @dataclass
 class TradeSignal:
-    """
-    Contrat de données pour le poste Signals (Adam) et Portfolio (Justine).
+    """Contrat de données pour le poste Signals (Adam) et Portfolio (Justine).
+
     Représente la pondération cible envoyée au backtester.
     """
 
