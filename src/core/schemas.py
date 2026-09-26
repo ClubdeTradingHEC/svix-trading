@@ -1,6 +1,6 @@
 """
-Core Data Contracts.
-Enforces type safety, data integrity, and strict boundaries across research modules.
+Core Data Contracts for Drift & Diffusion Quantitative Pipeline.
+Resolves look-ahead bias, maturity interpolation, and context propagation.
 """
 
 from dataclasses import dataclass
@@ -13,8 +13,7 @@ import pandas as pd
 
 
 class OptionType(str, Enum):
-    """Enumeration for option types to prevent arbitrary string instantiation."""
-
+    """Enumeration for option types."""
     CALL = "C"
     PUT = "P"
 
@@ -22,10 +21,9 @@ class OptionType(str, Enum):
 @dataclass(frozen=True)
 class OptionChain:
     """
-    Immutable data contract mapping the filtered volatility surface for a given maturity.
-    Expected upstream source: WRDS Data Engineering pipeline.
+    Immutable volatility surface for a single maturity.
+    Note: Analytics pipeline may require List[OptionChain] for constant maturity interpolation.
     """
-
     date: datetime
     maturity_days: float
     underlying_price: float
@@ -37,28 +35,29 @@ class OptionChain:
     def __post_init__(self) -> None:
         if self.maturity_days <= 0:
             raise ValueError(f"Invalid maturity: {self.maturity_days} days.")
-
         if self.options_data.empty:
-            raise ValueError("Data pipeline breach: options_data DataFrame is empty.")
-
-        required_columns = {"strike", "option_type", "bid", "ask", "mid_price"}
-        missing = required_columns - set(self.options_data.columns)
-        if missing:
-            raise ValueError(f"Data pipeline breach: missing required columns {missing}.")
-
+            raise ValueError("Empty options data payload.")
+        
+        required = {"strike", "option_type", "bid", "ask", "mid_price"}
+        if missing := required - set(self.options_data.columns):
+            raise ValueError(f"Missing columns: {missing}.")
+        
         if self.options_data[["strike", "mid_price"]].isnull().any().any():
-            raise ValueError("Data pipeline breach: NaN values detected in strikes or prices.")
+            raise ValueError("NaN values detected in critical pricing columns.")
 
 
 @dataclass(frozen=True)
 class VolatilityMetrics:
     """
-    Immutable data contract representing numerical integration results.
-    Expected upstream source: Analytics pipeline (Carr-Madan framework).
+    Numerical integration results.
+    Propagates underlying state (price, rates, dividends) required by Portfolio constraints.
     """
-
     date: datetime
     maturity_days: float
+    is_interpolated: bool  # True if derived from two OptionChains (e.g., 30-day constant)
+    underlying_price: float
+    risk_free_rate: float  # Required downstream for portfolio Sharpe and funding costs
+    dividend_yield: float  # Required downstream for Total Return calculations
     svix_annualized: float
     vix_annualized: float
     min_strike_used: float
@@ -67,38 +66,36 @@ class VolatilityMetrics:
 
     def __post_init__(self) -> None:
         if self.svix_annualized < 0 or self.vix_annualized < 0:
-            raise ValueError("Analytics pipeline breach: Calculated volatility is negative.")
-
+            raise ValueError("Calculated volatility cannot be negative.")
         if self.integration_points < 5:
-            raise ValueError(
-                "Analytics pipeline breach: Insufficient strike density for numerical integration."
-            )
+            raise ValueError("Insufficient integration grid density.")
 
     @property
     def variance_premium(self) -> float:
-        """
-        Computes the theoretical variance premium.
-        Defined as the difference between log-return variance and simple-return variance.
-        """
+        """Difference between log-return variance and simple-return variance."""
         return (self.vix_annualized**2) - (self.svix_annualized**2)
 
 
 @dataclass(frozen=True)
 class TradeSignal:
     """
-    Immutable data contract representing the target allocation vector.
-    Expected upstream source: Alpha Signals pipeline.
+    Target allocation vector for Delta-One S&P 500 trading.
+    Strictly separates signal generation timestamp from execution timestamp to prevent look-ahead bias.
     """
-
-    date: datetime
+    signal_date: datetime  # e.g., t (Market Close)
+    target_execution_date: datetime  # e.g., t+1 (Market Open)
+    underlying_price_at_signal: float
     target_weight: float
+    risk_free_rate: float  # Propagated for margin/cash yield calculation
+    dividend_yield: float  # Propagated for Total Return
     signal_confidence: Optional[float] = None
 
     def __post_init__(self) -> None:
+        if self.target_execution_date <= self.signal_date:
+            raise ValueError("Execution date must be strictly after signal date (Look-ahead bias).")
+            
         if np.isnan(self.target_weight) or np.isinf(self.target_weight):
-            raise ValueError("Signal pipeline breach: target_weight is NaN or Infinite.")
+            raise ValueError("Target weight must be a finite number.")
 
         if not -1.0 <= self.target_weight <= 1.0:
-            raise ValueError(
-                f"Signal pipeline breach: target_weight {self.target_weight} exceeds bounds [-1, 1]"
-            )
+            raise ValueError(f"Target weight {self.target_weight} outside absolute bounds [-1, 1].")

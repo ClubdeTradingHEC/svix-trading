@@ -1,0 +1,8 @@
+{
+    "date": "2026-09-25",
+    "maturity_days": 30,
+    "underlying_price": 4000.0,
+    "risk_free_rate": 0.05,
+    "dividend_yield": 0.01,
+    "forward_price": 4013.17
+}
