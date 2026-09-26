@@ -1,10 +1,10 @@
-from datetime import datetime
 import logging
+from datetime import datetime
 
-from src.data.wrds_loader import WRDSOptionLoader
 from src.analytics.variance_calculator import VariancePremiumCalculator
-from src.signals.signal_generator import AlphaSignalGenerator
+from src.data.wrds_loader import WRDSOptionLoader
 from src.portfolio.backtester import PortfolioSimulator
+from src.signals.signal_generator import AlphaSignalGenerator
 
 # Configure basic logging for the terminal
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -22,7 +22,7 @@ def run_pipeline():
         logging.info("Data extracted successfully.")
     except NotImplementedError as e:
         logging.warning(f"Data Module pending: {e}")
-        chains = [] # Placeholder to allow script to continue
+        chains = []  # Placeholder to allow script to continue
 
     # 2. ANALYTICS PIPELINE (Nelson)
     logging.info("--- Step 2: Analytics & Variance ---")
@@ -50,6 +50,7 @@ def run_pipeline():
     backtester = PortfolioSimulator(initial_capital=1_000_000.0)
     try:
         equity_curve = backtester.run_simulation(signals=signals)
+        logging.info(f"Equity curve: {equity_curve.head() if equity_curve is not None else 'No data available'}")
         logging.info("Backtest completed successfully.")
     except NotImplementedError as e:
         logging.warning(f"Portfolio Module pending: {e}")
