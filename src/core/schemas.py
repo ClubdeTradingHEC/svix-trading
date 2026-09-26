@@ -96,5 +96,5 @@ class TradeSignal:
 
         if not -1.0 <= self.target_weight <= 1.0:
             raise ValueError(
-                f"Signal pipeline breach: target_weight {self.target_weight} exceeds bounds [-1, 1]."
+                f"Signal pipeline breach: target_weight {self.target_weight} exceeds bounds [-1, 1]"
             )
