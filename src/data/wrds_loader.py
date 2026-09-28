@@ -11,6 +11,15 @@ import pandas as pd
 
 from src.core.schemas import OptionChain
 
+# OptionMetrics column names -> OptionChain contract column names.
+# TODO: align with the field names defined in src/core/schemas.py
+_OPTIONMETRICS_COLUMN_MAP = {
+    "cp_flag": "option_type",
+    "strike_price": "strike",
+    "best_bid": "bid",
+    "best_offer": "ask",
+}
+
 
 class WRDSOptionLoader:
     """
@@ -39,14 +48,16 @@ class WRDSOptionLoader:
         """
         raise NotImplementedError("Nizar: Write the raw WRDS SQL query here.")
 
-    def _apply_quantitative_filters(self, raw_df: pd.DataFrame) -> pd.DataFrame:
+    @staticmethod
+    def _apply_quantitative_filters(raw_df: pd.DataFrame) -> pd.DataFrame:
         """
         Cleans the option surface based on quantitative microstructure rules.
 
-        Rules to implement:
+        Rules implemented:
         1. Remove zero or negative bids.
-        2. Remove options with zero volume / open interest.
-        3. Filter out obvious Put-Call parity violations (arbitrage bounds).
+        2. Remove options with neither volume nor open interest.
+        3. Remove crossed quotes (ask < bid).
+           TODO: put-call parity bounds once the forward price is available.
         4. Standardize column names to match the OptionChain contract.
 
         Args:
@@ -55,7 +66,23 @@ class WRDSOptionLoader:
         Returns:
             pd.DataFrame: The cleaned surface ready for Analytics.
         """
-        raise NotImplementedError("Nizar: Implement pandas filtering logic here.")
+        df = raw_df.copy()
+
+        # 1. Zero or negative bids (NaN bids are dropped as well)
+        df = df[df["best_bid"] > 0]
+
+        # 2. No trading activity at all
+        df = df[(df["volume"] > 0) | (df["open_interest"] > 0)]
+
+        # 3. Crossed quotes
+        df = df[df["best_offer"] >= df["best_bid"]]
+
+        # 4. Standardization (OptionMetrics stores strikes multiplied by 1000)
+        df["strike_price"] = df["strike_price"] / 1000.0
+        df["mid"] = (df["best_bid"] + df["best_offer"]) / 2.0
+        df = df.rename(columns=_OPTIONMETRICS_COLUMN_MAP)
+
+        return df.sort_values(["option_type", "strike"]).reset_index(drop=True)
 
     def _extract_macro_state(self, date: datetime, target_maturity: float) -> Tuple[float, float, float, float]:
         """
