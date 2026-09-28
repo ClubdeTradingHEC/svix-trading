@@ -69,7 +69,10 @@ class VarianceCalculator:
         Returns:
             float: The interpolated, annualized constant maturity variance.
         """
-        raise NotImplementedError("Nelson: Implement the standard time-weighted variance interpolation formula.")
+        w1 = (days_t2 - target_days) / (days_t2 - days_t1)
+        w2 = (target_days - days_t1) / (days_t2 - days_t1)
+        total_variance = days_t1 * var_t1 * w1 + days_t2 * var_t2 * w2
+        return total_variance / target_days
 
     def compute_metrics(self, chains: List[OptionChain], target_days: int = 30) -> VolatilityMetrics:
         """
