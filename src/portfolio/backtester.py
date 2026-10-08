@@ -5,8 +5,6 @@ Models capital constraints, transaction costs, and computes institutional-grade 
 
 from typing import Dict, List
 
-import pandas as pd
-
 import numpy as np
 
 from src.core.schemas import TradeSignal
