@@ -63,7 +63,7 @@ class PortfolioSimulator:
         downside = np.sqrt((returns.clip(upper=0) ** 2).mean())
         sortino = returns.mean() / downside * np.sqrt(self.ann_factor) if downside > 0 else nan
  
-        years: float = len(returns) / self.ann_factor
+        years: float = float(len(returns)) / self.ann_factor
         ann_return = (equity_curve.iloc[-1] / equity_curve.iloc[0]) ** (1 / years) - 1
         calmar = ann_return / abs(max_dd) if max_dd < 0 else nan
  
