@@ -112,9 +112,7 @@ class PortfolioSimulator:
 
             if equity > 0:
                 current_weight = asset_value / equity
-                cost = self._calculate_transaction_costs(
-                    current_weight, s.target_weight, equity
-                )
+                cost = self._calculate_transaction_costs(current_weight, s.target_weight, equity)
                 cash -= cost
                 equity -= cost
 
