@@ -10,7 +10,10 @@ class PortfolioSimulator:
     """Simulates a portfolio under capital constraints and market frictions."""
 
     def __init__(
-        self, initial_capital: float = 1_000_000.0, transaction_cost_bps: float = 5.0, annualization_factor: int = 252
+        self,
+        initial_capital: float = 1_000_000.0,
+        transaction_cost_bps: float = 5.0,
+        annualization_factor: int = 252,
     ) -> None:
         """
         Args:
@@ -22,7 +25,12 @@ class PortfolioSimulator:
         self.t_cost_rate = transaction_cost_bps / 10_000.0
         self.ann_factor = annualization_factor
 
-    def _calculate_transaction_costs(self, current_weight: float, target_weight: float, portfolio_value: float) -> float:
+    def _calculate_transaction_costs(
+        self,
+        current_weight: float,
+        target_weight: float,
+        portfolio_value: float,
+    ) -> float:
         """
         Args:
             current_weight: Portfolio weight before the signal.
@@ -32,9 +40,14 @@ class PortfolioSimulator:
         Returns:
             Absolute transaction cost deducted from cash.
         """
-        return abs(target_weight - current_weight) * portfolio_value * self.t_cost_rate
+        delta = abs(target_weight - current_weight)
+        return delta * portfolio_value * self.t_cost_rate
 
-    def _compute_risk_metrics(self, equity_curve: pd.Series, risk_free: float = 0.0) -> Dict[str, float]:
+    def _compute_risk_metrics(
+        self,
+        equity_curve: pd.Series,
+        risk_free: float = 0.0,
+    ) -> Dict[str, float]:
         """
         Args:
             equity_curve: Daily total equity, starting with the initial capital.
@@ -55,8 +68,11 @@ class PortfolioSimulator:
         max_dd = (equity_curve / equity_curve.cummax() - 1).min()
 
         sharpe = excess.mean() / excess.std() * np.sqrt(self.ann_factor)
+
         downside = np.sqrt((excess.clip(upper=0) ** 2).mean())
-        sortino = excess.mean() / downside * np.sqrt(self.ann_factor) if downside > 0 else nan
+        sortino = np.nan
+        if downside > 0:
+            sortino = excess.mean() / downside * np.sqrt(self.ann_factor)
 
         years = len(returns) / self.ann_factor
         ann_return = (equity_curve.iloc[-1] / equity_curve.iloc[0]) ** (1 / years) - 1
@@ -72,7 +88,8 @@ class PortfolioSimulator:
             signals: Alpha signals, sorted by date.
 
         Returns:
-            Daily ledger with Date, Position_Weight, Cash, Asset_Value, Total_Equity, Daily_Return.
+            Daily ledger with Date, Position_Weight, Cash, Asset_Value,
+            Total_Equity and Daily_Return.
         """
         signals = sorted(signals, key=lambda s: s.date)
         dt = 1 / self.ann_factor
@@ -95,7 +112,9 @@ class PortfolioSimulator:
 
             if equity > 0:
                 current_weight = asset_value / equity
-                cost = self._calculate_transaction_costs(current_weight, s.target_weight, equity)
+                cost = self._calculate_transaction_costs(
+                    current_weight, s.target_weight, equity
+                )
                 cash -= cost
                 equity -= cost
 
@@ -104,14 +123,16 @@ class PortfolioSimulator:
                 shares = target_value / price
                 asset_value = target_value
 
-            ledger.append({
+            position_weight = asset_value / equity if equity > 0 else 0.0
+            row = {
                 "Date": s.date,
-                "Position_Weight": asset_value / equity if equity > 0 else 0.0,
+                "Position_Weight": position_weight,
                 "Cash": cash,
                 "Asset_Value": asset_value,
                 "Total_Equity": equity,
                 "Daily_Return": equity / prev_equity - 1,
-            })
+            }
+            ledger.append(row)
             prev_equity = equity
 
             if equity <= 0:
@@ -120,11 +141,13 @@ class PortfolioSimulator:
 
         df = pd.DataFrame(ledger).set_index("Date")
 
-        equity_curve = pd.concat(
-            [pd.Series([self.initial_capital]), df["Total_Equity"].reset_index(drop=True)],
-            ignore_index=True,
-        )
-        avg_rf = float(np.mean([s.risk_free_rate for s in signals])) if signals else 0.0
+        equity_series = df["Total_Equity"].reset_index(drop=True)
+        start = pd.Series([self.initial_capital])
+        equity_curve = pd.concat([start, equity_series], ignore_index=True)
+
+        rates = [s.risk_free_rate for s in signals]
+        avg_rf = float(np.mean(rates)) if rates else 0.0
+
         metrics = self._compute_risk_metrics(equity_curve, avg_rf)
         for k, v in metrics.items():
             print(f"{k:>13}: {v:.4f}")
