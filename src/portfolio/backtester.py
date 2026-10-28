@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class PortfolioSimulator:
+    """Simulates a portfolio under capital constraints and market frictions."""
 
     def __init__(
         self,
@@ -17,7 +18,13 @@ class PortfolioSimulator:
         transaction_cost_bps: float = 5.0,
         annualization_factor: int = 252,
     ) -> None:
-       
+        """
+        Args:
+            initial_capital: Starting equity in base currency.
+            transaction_cost_bps: Commissions + slippage per trade, in basis points.
+            annualization_factor: Trading days per year.
+        """
+
         self.initial_capital = initial_capital
         self.t_cost_rate = transaction_cost_bps / 10_000.0
         self.ann_factor = annualization_factor
@@ -29,7 +36,16 @@ class PortfolioSimulator:
         target_weight: float,
         portfolio_value: float,
     ) -> float:
-       
+        """
+        Args:
+            current_weight: Portfolio weight before the signal.
+            target_weight: Desired weight from the signal.
+            portfolio_value: Total equity at execution.
+
+        Returns:
+            Absolute transaction cost deducted from cash.
+        """
+
         delta = abs(target_weight - current_weight)
         return delta * portfolio_value * self.t_cost_rate
 
@@ -38,7 +54,15 @@ class PortfolioSimulator:
         equity_curve: pd.Series,
         risk_free: float = 0.0,
     ) -> Dict[str, float]:
-        
+        """
+        Args:
+            equity_curve: Daily total equity, starting with the initial capital.
+            risk_free: Average annual risk-free rate, used for excess returns.
+
+        Returns:
+            Sharpe, Sortino, Calmar and Max_Drawdown.
+        """
+
         nan = float("nan")
         if (equity_curve <= 0).any():
             return {"Sharpe": nan, "Sortino": nan, "Calmar": nan, "Max_Drawdown": -1.0}
@@ -64,7 +88,19 @@ class PortfolioSimulator:
         return {"Sharpe": sharpe, "Sortino": sortino, "Calmar": calmar, "Max_Drawdown": max_dd}
 
     def run_simulation(self, signals: List[TradeSignal]) -> pd.DataFrame:
-        
+        """
+        Chronological event loop that updates cash, position and equity.
+
+        Metrics are stored in self.metrics so the caller can read them.
+
+        Args:
+            signals: Alpha signals.
+
+        Returns:
+            Daily ledger with Date, Position_Weight, Cash, Asset_Value,
+            Total_Equity and Daily_Return.
+        """
+
         signals = sorted(signals, key=lambda s: s.target_execution_date)
         dt = 1 / self.ann_factor
 
