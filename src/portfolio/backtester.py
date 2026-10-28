@@ -10,26 +10,20 @@ logger = logging.getLogger(__name__)
 
 
 class PortfolioSimulator:
-<<<<<<< HEAD
     """Simulates a portfolio under capital constraints and market frictions."""
 
-=======
->>>>>>> 4b64741 (Format backtester and tests with ruff)
     def __init__(
         self,
         initial_capital: float = 1_000_000.0,
         transaction_cost_bps: float = 5.0,
         annualization_factor: int = 252,
     ) -> None:
-<<<<<<< HEAD
         """
         Args:
             initial_capital: Starting equity in base currency.
             transaction_cost_bps: Commissions + slippage per trade, in basis points.
             annualization_factor: Trading days per year.
         """
-=======
->>>>>>> 4b64741 (Format backtester and tests with ruff)
 
         self.initial_capital = initial_capital
         self.t_cost_rate = transaction_cost_bps / 10_000.0
@@ -42,7 +36,6 @@ class PortfolioSimulator:
         target_weight: float,
         portfolio_value: float,
     ) -> float:
-<<<<<<< HEAD
         """
         Args:
             current_weight: Portfolio weight before the signal.
@@ -52,8 +45,6 @@ class PortfolioSimulator:
         Returns:
             Absolute transaction cost deducted from cash.
         """
-=======
->>>>>>> 4b64741 (Format backtester and tests with ruff)
 
         delta = abs(target_weight - current_weight)
         return delta * portfolio_value * self.t_cost_rate
@@ -63,7 +54,6 @@ class PortfolioSimulator:
         equity_curve: pd.Series,
         risk_free: float = 0.0,
     ) -> Dict[str, float]:
-<<<<<<< HEAD
         """
         Args:
             equity_curve: Daily total equity, starting with the initial capital.
@@ -72,8 +62,6 @@ class PortfolioSimulator:
         Returns:
             Sharpe, Sortino, Calmar and Max_Drawdown.
         """
-=======
->>>>>>> 4b64741 (Format backtester and tests with ruff)
 
         nan = float("nan")
         if (equity_curve <= 0).any():
@@ -100,7 +88,6 @@ class PortfolioSimulator:
         return {"Sharpe": sharpe, "Sortino": sortino, "Calmar": calmar, "Max_Drawdown": max_dd}
 
     def run_simulation(self, signals: List[TradeSignal]) -> pd.DataFrame:
-<<<<<<< HEAD
         """
         Chronological event loop that updates cash, position and equity.
 
@@ -113,8 +100,6 @@ class PortfolioSimulator:
             Daily ledger with Date, Position_Weight, Cash, Asset_Value,
             Total_Equity and Daily_Return.
         """
-=======
->>>>>>> 4b64741 (Format backtester and tests with ruff)
 
         signals = sorted(signals, key=lambda s: s.target_execution_date)
         dt = 1 / self.ann_factor
