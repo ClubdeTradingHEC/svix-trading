@@ -52,8 +52,9 @@ class VarianceCalculator:
             "Apply the correct discount factors and integration weights."
         )
 
+    @staticmethod
     def _interpolate_constant_maturity(
-        self, var_t1: float, days_t1: float, var_t2: float, days_t2: float, target_days: int = 30
+        var_t1: float, days_t1: float, var_t2: float, days_t2: float, target_days: int = 30
     ) -> float:
         """
         Applies time-weighted linear interpolation between two maturities to extract
@@ -69,6 +70,8 @@ class VarianceCalculator:
         Returns:
             float: The interpolated, annualized constant maturity variance.
         """
+        if days_t2 == days_t1:
+            raise ValueError("days_t1 and days_t2 must differ to interpolate")
         w1 = (days_t2 - target_days) / (days_t2 - days_t1)
         w2 = (target_days - days_t1) / (days_t2 - days_t1)
         total_variance = days_t1 * var_t1 * w1 + days_t2 * var_t2 * w2
