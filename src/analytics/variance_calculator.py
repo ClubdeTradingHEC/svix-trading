@@ -5,7 +5,9 @@ Implements the Carr-Madan model-free replication for VIX and Ian Martin's (2017)
 
 from typing import List
 
+import numpy as np
 import pandas as pd
+from scipy.integrate import simpson
 
 from src.core.schemas import OptionChain, VolatilityMetrics
 
@@ -31,7 +33,8 @@ class VarianceCalculator:
             "Nelson: Filter the chain.options_data using chain.forward_price. Return a consolidated DataFrame sorted by strike."
         )
 
-    def _integrate_variance(self, otm_surface: pd.DataFrame, chain: OptionChain, is_svix: bool) -> float:
+    @staticmethod
+    def _integrate_variance(otm_surface: pd.DataFrame, chain: OptionChain, is_svix: bool) -> float:
         """
         Performs the numerical integration over the OTM surface.
 
@@ -47,13 +50,26 @@ class VarianceCalculator:
         Returns:
             float: The raw, annualized variance for this specific maturity.
         """
-        raise NotImplementedError(
-            "Nelson: Implement numerical integration (e.g., using scipy.integrate.simpson). "
-            "Apply the correct discount factors and integration weights."
-        )
+        strikes = otm_surface["strike"].to_numpy()
+        prices = otm_surface["mid_price"].to_numpy()
 
+        s0 = chain.underlying_price
+        r = chain.risk_free_rate
+        t = chain.maturity_days / 365
+
+        if is_svix:
+            integrand = prices
+            factor = 2 / (t * np.exp(r * t) * s0**2)
+        else:
+            integrand = prices / strikes**2
+            factor = 2 * np.exp(r * t) / t
+
+        integral = simpson(integrand, x=strikes)
+        return factor * integral
+
+    @staticmethod
     def _interpolate_constant_maturity(
-        self, var_t1: float, days_t1: float, var_t2: float, days_t2: float, target_days: int = 30
+        var_t1: float, days_t1: float, var_t2: float, days_t2: float, target_days: int = 30
     ) -> float:
         """
         Applies time-weighted linear interpolation between two maturities to extract
@@ -69,7 +85,12 @@ class VarianceCalculator:
         Returns:
             float: The interpolated, annualized constant maturity variance.
         """
-        raise NotImplementedError("Nelson: Implement the standard time-weighted variance interpolation formula.")
+        if days_t2 == days_t1:
+            raise ValueError("days_t1 and days_t2 must differ to interpolate")
+        w1 = (days_t2 - target_days) / (days_t2 - days_t1)
+        w2 = (target_days - days_t1) / (days_t2 - days_t1)
+        total_variance = days_t1 * var_t1 * w1 + days_t2 * var_t2 * w2
+        return total_variance / target_days
 
     def compute_metrics(self, chains: List[OptionChain], target_days: int = 30) -> VolatilityMetrics:
         """
