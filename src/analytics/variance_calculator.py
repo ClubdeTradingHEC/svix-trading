@@ -5,7 +5,9 @@ Implements the Carr-Madan model-free replication for VIX and Ian Martin's (2017)
 
 from typing import List
 
+import numpy as np
 import pandas as pd
+from scipy.integrate import simpson
 
 from src.core.schemas import OptionChain, VolatilityMetrics
 
@@ -31,7 +33,8 @@ class VarianceCalculator:
             "Nelson: Filter the chain.options_data using chain.forward_price. Return a consolidated DataFrame sorted by strike."
         )
 
-    def _integrate_variance(self, otm_surface: pd.DataFrame, chain: OptionChain, is_svix: bool) -> float:
+    @staticmethod
+    def _integrate_variance(otm_surface: pd.DataFrame, chain: OptionChain, is_svix: bool) -> float:
         """
         Performs the numerical integration over the OTM surface.
 
@@ -47,10 +50,22 @@ class VarianceCalculator:
         Returns:
             float: The raw, annualized variance for this specific maturity.
         """
-        raise NotImplementedError(
-            "Nelson: Implement numerical integration (e.g., using scipy.integrate.simpson). "
-            "Apply the correct discount factors and integration weights."
-        )
+        strikes = otm_surface["strike"].to_numpy()
+        prices = otm_surface["mid_price"].to_numpy()
+
+        s0 = chain.underlying_price
+        r = chain.risk_free_rate
+        t = chain.maturity_days / 365
+
+        if is_svix:
+            integrand = prices
+            factor = 2 / (t * np.exp(r * t) * s0**2)
+        else:
+            integrand = prices / strikes**2
+            factor = 2 * np.exp(r * t) / t
+
+        integral = simpson(integrand, x=strikes)
+        return factor * integral
 
     @staticmethod
     def _interpolate_constant_maturity(
