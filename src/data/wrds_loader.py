@@ -19,6 +19,10 @@ _OPTIONMETRICS_COLUMN_MAP = {
     "best_offer": "ask",
 }
 
+# Minimum liquidity thresholds: an option is kept if it reaches at least one of them.
+_MIN_VOLUME = 10
+_MIN_OPEN_INTEREST = 10
+
 
 class WRDSOptionLoader:
     """
@@ -54,7 +58,9 @@ class WRDSOptionLoader:
 
         Rules implemented:
         1. Remove zero or negative bids.
-        2. Remove options with neither volume nor open interest.
+        2. Remove illiquid options: an option is kept only if its volume or its
+           open interest reaches the minimum threshold (_MIN_VOLUME,
+           _MIN_OPEN_INTEREST).
         3. Remove crossed (ask < bid) and locked (ask == bid) quotes:
            a valid market must always have a strictly positive spread.
            TODO: put-call parity bounds once the forward price is available.
@@ -71,8 +77,8 @@ class WRDSOptionLoader:
         # 1. Zero or negative bids (NaN bids are dropped as well)
         df = df[df["best_bid"] > 0]
 
-        # 2. No trading activity at all
-        df = df[(df["volume"] > 0) | (df["open_interest"] > 0)]
+        # 2. Illiquid options (neither traded nor held in sufficient size)
+        df = df[(df["volume"] >= _MIN_VOLUME) | (df["open_interest"] >= _MIN_OPEN_INTEREST)]
 
         # 3. Crossed or locked quotes (strictly positive spread required)
         df = df[df["best_offer"] > df["best_bid"]]
