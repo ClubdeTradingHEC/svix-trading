@@ -11,3 +11,6 @@ wheels/
 # Virtual environments
 .venv
 notebooks/.ipynb_checkpoints/
+
+# Environment variables (credentials)
+.env
