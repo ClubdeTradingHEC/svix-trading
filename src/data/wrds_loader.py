@@ -4,10 +4,13 @@ Handles database connections,
 raw SQL queries, and volatility surface micro-structure filtering.
 """
 
+import os
 from datetime import datetime
 from typing import List, Tuple
 
 import pandas as pd
+import wrds
+from dotenv import load_dotenv
 
 from src.core.schemas import OptionChain
 
@@ -33,9 +36,19 @@ class WRDSOptionLoader:
     def __init__(self) -> None:
         """
         Initializes the loader and the database connection.
+        Reads the WRDS username from the WRDS_USERNAME environment variable
+        (loaded from the .env file at the project root).
+
+        Raises:
+            ValueError: If WRDS_USERNAME is not defined.
         """
-        self._connection = None
-        raise NotImplementedError("Nizar: Implement the wrds.Connection() logic here.")
+        load_dotenv()
+        username = os.getenv("WRDS_USERNAME")
+
+        if not username:
+            raise ValueError("WRDS_USERNAME is not set. Add it to your .env file.")
+
+        self._connection = wrds.Connection(wrds_username=username)
 
     def _query_raw_surface(self, date: datetime, min_maturity: int, max_maturity: int) -> pd.DataFrame:
         """
