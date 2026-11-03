@@ -12,7 +12,6 @@ import pandas as pd
 from src.core.schemas import OptionChain
 
 # OptionMetrics column names -> OptionChain contract column names.
-# TODO: align with the field names defined in src/core/schemas.py
 _OPTIONMETRICS_COLUMN_MAP = {
     "cp_flag": "option_type",
     "strike_price": "strike",
@@ -56,7 +55,8 @@ class WRDSOptionLoader:
         Rules implemented:
         1. Remove zero or negative bids.
         2. Remove options with neither volume nor open interest.
-        3. Remove crossed quotes (ask < bid).
+        3. Remove crossed (ask < bid) and locked (ask == bid) quotes:
+           a valid market must always have a strictly positive spread.
            TODO: put-call parity bounds once the forward price is available.
         4. Standardize column names to match the OptionChain contract.
 
@@ -74,12 +74,12 @@ class WRDSOptionLoader:
         # 2. No trading activity at all
         df = df[(df["volume"] > 0) | (df["open_interest"] > 0)]
 
-        # 3. Crossed quotes
-        df = df[df["best_offer"] >= df["best_bid"]]
+        # 3. Crossed or locked quotes (strictly positive spread required)
+        df = df[df["best_offer"] > df["best_bid"]]
 
         # 4. Standardization (OptionMetrics stores strikes multiplied by 1000)
         df["strike_price"] = df["strike_price"] / 1000.0
-        df["mid"] = (df["best_bid"] + df["best_offer"]) / 2.0
+        df["mid_price"] = (df["best_bid"] + df["best_offer"]) / 2.0
         df = df.rename(columns=_OPTIONMETRICS_COLUMN_MAP)
 
         return df.sort_values(["option_type", "strike"]).reset_index(drop=True)
