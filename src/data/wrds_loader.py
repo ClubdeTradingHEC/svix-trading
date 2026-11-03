@@ -14,6 +14,9 @@ from dotenv import load_dotenv
 
 from src.core.schemas import OptionChain
 
+# OptionMetrics security identifier of the S&P 500 index (SPX).
+_SPX_SECID = 108105
+
 # OptionMetrics column names -> OptionChain contract column names.
 _OPTIONMETRICS_COLUMN_MAP = {
     "cp_flag": "option_type",
@@ -50,9 +53,39 @@ class WRDSOptionLoader:
 
         self._connection = wrds.Connection(wrds_username=username)
 
+    def _run_query(self, sql: str, params: dict | None = None) -> pd.DataFrame:
+        """
+        Executes a SQL query on WRDS and returns the result as a DataFrame.
+
+        Queries go through the underlying psycopg2 connection: wrds 3.1.6 pins
+        SQLAlchemy 1.4, which pandas 3 no longer supports, so
+        wrds.Connection.raw_sql fails with "'Connection' object has no attribute 'cursor'".
+
+        Args:
+            sql (str): The SQL query, with %(name)s placeholders for parameters.
+            params (dict | None): Values for the query placeholders.
+
+        Returns:
+            pd.DataFrame: The query result.
+        """
+        raw_conn = self._connection.connection.connection
+        try:
+            with raw_conn.cursor() as cur:
+                cur.execute(sql, params)
+                columns = [col[0] for col in cur.description]
+                return pd.DataFrame(cur.fetchall(), columns=columns)
+        except Exception:
+            raw_conn.rollback()  # reset the connection state after a failed query
+            raise
+
     def _query_raw_surface(self, date: datetime, min_maturity: int, max_maturity: int) -> pd.DataFrame:
         """
-        Executes the raw SQL query to OptionMetrics (opprcd, secprd, zerocd tables).
+        Executes the raw SQL query to OptionMetrics (opprcd table).
+
+        Returns all SPX options quoted on the target date whose maturity lies between
+        min_maturity and max_maturity days. Both AM-settled (SPX) and PM-settled (SPXW)
+        series are returned, with am_settlement and expiry_indicator columns so that
+        the series selection can be made downstream.
 
         Args:
             date (datetime): The target historical date.
@@ -62,7 +95,27 @@ class WRDSOptionLoader:
         Returns:
             pd.DataFrame: Unfiltered, raw WRDS dataframe.
         """
-        raise NotImplementedError("Nizar: Write the raw WRDS SQL query here.")
+        # OptionMetrics splits option prices into one table per year.
+        # The table name is built from an integer year, so it is safe to format.
+        table = f"optionm.opprcd{date.year}"
+        sql = f"""
+            SELECT
+                date, exdate, (exdate - date) AS maturity_days,
+                cp_flag, strike_price, best_bid, best_offer,
+                volume, open_interest, impl_volatility,
+                forward_price, am_settlement, expiry_indicator, root
+            FROM {table}
+            WHERE secid = %(secid)s
+              AND date = %(date)s
+              AND (exdate - date) BETWEEN %(min_m)s AND %(max_m)s
+        """
+        params = {
+            "secid": _SPX_SECID,
+            "date": pd.Timestamp(date).date(),
+            "min_m": min_maturity,
+            "max_m": max_maturity,
+        }
+        return self._run_query(sql, params)
 
     @staticmethod
     def _apply_quantitative_filters(raw_df: pd.DataFrame) -> pd.DataFrame:
