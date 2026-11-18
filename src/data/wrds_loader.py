@@ -8,6 +8,7 @@ import os
 from datetime import datetime
 from typing import List, Tuple
 
+import numpy as np
 import pandas as pd
 import wrds
 from dotenv import load_dotenv
@@ -28,6 +29,9 @@ _OPTIONMETRICS_COLUMN_MAP = {
 # Minimum liquidity thresholds: an option is kept if it reaches at least one of them.
 _MIN_VOLUME = 10
 _MIN_OPEN_INTEREST = 10
+
+# Day-count convention used to convert maturities in days into years.
+_DAYS_PER_YEAR = 365.0
 
 
 class WRDSOptionLoader:
@@ -97,7 +101,7 @@ class WRDSOptionLoader:
         """
         # OptionMetrics splits option prices into one table per year.
         # The table name is built from an integer year, so it is safe to format.
-        table = f"optionm.opprcd{date.year}"
+        table = f"optionm.opprcd{pd.Timestamp(date).year}"
         sql = f"""
             SELECT
                 date, exdate, (exdate - date) AS maturity_days,
@@ -116,6 +120,26 @@ class WRDSOptionLoader:
             "max_m": max_maturity,
         }
         return self._run_query(sql, params)
+
+    @staticmethod
+    def _select_settlement_series(raw_df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Keeps a single settlement series per expiry to avoid double counting strikes.
+
+        Monthly expiries list both AM-settled SPX and PM-settled SPXW options at the
+        same strikes. The PM-settled series is kept when it exists, since its maturity
+        in calendar days matches a close-to-close horizon; otherwise the AM-settled
+        series is kept.
+
+        Args:
+            raw_df (pd.DataFrame): The raw dataframe from WRDS.
+
+        Returns:
+            pd.DataFrame: The surface with one settlement series per expiry.
+        """
+        has_pm_series = raw_df.groupby("exdate")["am_settlement"].transform(lambda s: (s == 0).any())
+        keep = (raw_df["am_settlement"] == 0) | ~has_pm_series
+        return raw_df[keep]
 
     @staticmethod
     def _apply_quantitative_filters(raw_df: pd.DataFrame) -> pd.DataFrame:
@@ -156,9 +180,50 @@ class WRDSOptionLoader:
 
         return df.sort_values(["option_type", "strike"]).reset_index(drop=True)
 
+    @staticmethod
+    def _interpolate_rate(curve: pd.DataFrame, maturity_days: float) -> float:
+        """
+        Interpolates the zero-coupon curve at a given maturity.
+
+        Linear interpolation in maturity, flat beyond the curve's end points.
+        OptionMetrics zero rates are continuously compounded and quoted in percent.
+
+        Args:
+            curve (pd.DataFrame): Zero curve with 'days' and 'rate' columns.
+            maturity_days (float): Target maturity in days.
+
+        Returns:
+            float: Continuously compounded rate, in decimal form.
+        """
+        curve = curve.sort_values("days")
+        rate_pct = np.interp(maturity_days, curve["days"].astype(float), curve["rate"].astype(float))
+        return float(rate_pct) / 100.0
+
+    @staticmethod
+    def _forward_price(spot: float, rate: float, dividend_yield: float, maturity_days: float) -> float:
+        """
+        Theoretical forward price under continuous compounding: F = S * exp((r - q) * T).
+
+        Args:
+            spot (float): Underlying price S.
+            rate (float): Risk-free rate r, in decimal form.
+            dividend_yield (float): Dividend yield q, in decimal form.
+            maturity_days (float): Maturity in days.
+
+        Returns:
+            float: The forward price F.
+        """
+        maturity_years = maturity_days / _DAYS_PER_YEAR
+        return float(spot * np.exp((rate - dividend_yield) * maturity_years))
+
     def _extract_macro_state(self, date: datetime, target_maturity: float) -> Tuple[float, float, float, float]:
         """
         Retrieves the underlying market state for a specific date and maturity.
+
+        - Underlying price: SPX close (optionm.secprd<year>).
+        - Risk-free rate: zero curve (optionm.zerocd) interpolated at the target maturity.
+        - Dividend yield: SPX index dividend yield (optionm.idxdvd).
+        - Forward price: F = S * exp((r - q) * T).
 
         Args:
             date (datetime): Target date.
@@ -166,13 +231,48 @@ class WRDSOptionLoader:
 
         Returns:
             Tuple[float, float, float, float]: (underlying_price, risk_free_rate, dividend_yield, forward_price)
+
+        Raises:
+            ValueError: If one of the market inputs is missing for this date.
         """
-        raise NotImplementedError("Nizar: Extract S, r, q from WRDS tables and compute the theoretical Forward Price (F).")
+        params = {"secid": _SPX_SECID, "date": pd.Timestamp(date).date()}
+
+        spot = self._run_query(
+            f"SELECT close FROM optionm.secprd{pd.Timestamp(date).year} WHERE secid = %(secid)s AND date = %(date)s",
+            params,
+        )
+        if spot.empty:
+            raise ValueError(f"No SPX closing price on {params['date']}.")
+        underlying_price = float(spot["close"].iloc[0])
+
+        curve = self._run_query("SELECT days, rate FROM optionm.zerocd WHERE date = %(date)s", params)
+        if curve.empty:
+            raise ValueError(f"No zero-coupon curve on {params['date']}.")
+        risk_free_rate = self._interpolate_rate(curve, target_maturity)
+
+        dividend = self._run_query(
+            "SELECT rate FROM optionm.idxdvd WHERE secid = %(secid)s AND date = %(date)s",
+            params,
+        )
+        if dividend.empty:
+            raise ValueError(f"No SPX dividend yield on {params['date']}.")
+        dividend_yield = float(dividend["rate"].iloc[0]) / 100.0
+
+        forward_price = self._forward_price(underlying_price, risk_free_rate, dividend_yield, target_maturity)
+        return underlying_price, risk_free_rate, dividend_yield, forward_price
 
     def get_interpolation_chains(self, date: datetime, target_days: int = 30) -> List[OptionChain]:
         """
         Fetches the two option chains bracketing the target maturity.
         Required by the Analytics module for constant-maturity interpolation (e.g., 30-day VIX).
+
+        Steps:
+        1. Query the surface between target_days - 15 and target_days + 15.
+        2. Keep one settlement series per expiry (_select_settlement_series).
+        3. Clean the data (_apply_quantitative_filters).
+        4. Identify T1 (longest maturity < target_days) and T2 (shortest maturity >= target_days)
+           among the expiries that still have options after cleaning.
+        5. Extract the macro state for T1 and T2 and package the two OptionChain contracts.
 
         Args:
             date (datetime): The target historical date.
@@ -181,12 +281,38 @@ class WRDSOptionLoader:
         Returns:
             List[OptionChain]: A list containing exactly two OptionChain contracts
                                (the nearest sub-30 maturity and the nearest post-30 maturity).
-        """
-        # Architectural guidance for Nizar:
-        # 1. Query surface between target_days - 15 and target_days + 15
-        # 2. Identify the closest maturities T1 < target_days and T2 >= target_days
-        # 3. Clean the data using _apply_quantitative_filters
-        # 4. Extract macro state for T1 and T2
-        # 5. Package and return [OptionChain(T1), OptionChain(T2)]
 
-        raise NotImplementedError("Nizar: Implement the bracketing logic and return the instantiated contracts.")
+        Raises:
+            ValueError: If no options are available or the target maturity cannot be bracketed.
+        """
+        raw = self._query_raw_surface(date, max(1, target_days - 15), target_days + 15)
+        if raw.empty:
+            raise ValueError(f"No SPX options found on {pd.Timestamp(date).date()}.")
+
+        clean = self._apply_quantitative_filters(self._select_settlement_series(raw))
+
+        maturities = sorted(clean["maturity_days"].unique())
+        below = [m for m in maturities if m < target_days]
+        above = [m for m in maturities if m >= target_days]
+        if not below or not above:
+            raise ValueError(
+                f"Cannot bracket a {target_days}-day maturity on {pd.Timestamp(date).date()}: "
+                f"available maturities are {maturities}."
+            )
+
+        chains = []
+        for maturity in (below[-1], above[0]):
+            options = clean[clean["maturity_days"] == maturity].reset_index(drop=True)
+            underlying_price, risk_free_rate, dividend_yield, forward_price = self._extract_macro_state(date, float(maturity))
+            chains.append(
+                OptionChain(
+                    date=date,
+                    maturity_days=float(maturity),
+                    underlying_price=underlying_price,
+                    risk_free_rate=risk_free_rate,
+                    forward_price=forward_price,
+                    options_data=options,
+                    dividend_yield=dividend_yield,
+                )
+            )
+        return chains
