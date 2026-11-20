@@ -3,7 +3,9 @@ Unit Tests for the Analytics Module.
 Validates the constant maturity interpolation and the variance integration.
 """
 
+import json
 from datetime import datetime
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -85,3 +87,33 @@ def test_svix_above_vix() -> None:
     """In a Black-Scholes market, SVIX^2 must be slightly above VIX^2."""
     otm, chain = _make_bs_chain()
     assert integrate(otm, chain, is_svix=True) > integrate(otm, chain, is_svix=False)
+
+
+# ==========================================
+# OTM Isolation Tests (Données « dummy »)
+# ==========================================
+
+DATA_DIR = Path(__file__).parent / "data"
+
+
+def _load_dummy_chain() -> OptionChain:
+    """Loads the dummy SPX chain (one call and one put per strike) from tests/data."""
+    df = pd.read_csv(DATA_DIR / "dummy_spx_chain.csv")
+    ctx = json.loads((DATA_DIR / "dummy_spx_context.json").read_text())
+    ctx["date"] = datetime.fromisoformat(ctx["date"])
+    return OptionChain(**ctx, options_data=df)
+
+
+def test_isolate_splits_at_forward() -> None:
+    """Puts must be strictly below the forward, calls at or above it."""
+    chain = _load_dummy_chain()
+    otm = VarianceCalculator._isolate_otm_options(chain)
+    assert (otm[otm["option_type"] == "P"]["strike"] < chain.forward_price).all()
+    assert (otm[otm["option_type"] == "C"]["strike"] >= chain.forward_price).all()
+
+
+def test_isolate_one_option_per_strike_sorted() -> None:
+    """The OTM surface must contain one option per strike, sorted by strike."""
+    otm = VarianceCalculator._isolate_otm_options(_load_dummy_chain())
+    assert otm["strike"].is_unique
+    assert otm["strike"].is_monotonic_increasing

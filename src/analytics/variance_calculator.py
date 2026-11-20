@@ -18,7 +18,8 @@ class VarianceCalculator:
     Handles Out-of-the-Money (OTM) filtration, numerical integration, and constant-maturity interpolation.
     """
 
-    def _isolate_otm_options(self, chain: OptionChain) -> pd.DataFrame:
+    @staticmethod
+    def _isolate_otm_options(chain: OptionChain) -> pd.DataFrame:
         """
         Splits the volatility surface at the forward price.
         Retains strictly Out-of-the-Money (OTM) puts (K < F) and OTM calls (K >= F).
@@ -29,9 +30,14 @@ class VarianceCalculator:
         Returns:
             pd.DataFrame: A sorted continuum of OTM options mapped by strike.
         """
-        raise NotImplementedError(
-            "Nelson: Filter the chain.options_data using chain.forward_price. Return a consolidated DataFrame sorted by strike."
-        )
+        options = chain.options_data
+        forward = chain.forward_price
+
+        otm_puts = options[(options["option_type"] == "P") & (options["strike"] < forward)]
+        otm_calls = options[(options["option_type"] == "C") & (options["strike"] >= forward)]
+
+        otm = pd.concat([otm_puts, otm_calls])
+        return otm.sort_values("strike").reset_index(drop=True)
 
     @staticmethod
     def _integrate_variance(otm_surface: pd.DataFrame, chain: OptionChain, is_svix: bool) -> float:
