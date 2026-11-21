@@ -117,3 +117,54 @@ def test_isolate_one_option_per_strike_sorted() -> None:
     otm = VarianceCalculator._isolate_otm_options(_load_dummy_chain())
     assert otm["strike"].is_unique
     assert otm["strike"].is_monotonic_increasing
+
+
+# ==========================================
+# Full Pipeline Tests (compute_metrics)
+# ==========================================
+
+
+def _make_full_bs_chain(days: float) -> OptionChain:
+    """Builds a full Black-Scholes chain (one call and one put per strike) at 20 % vol."""
+    t = days / 365
+    f = S0 * np.exp(R * t)
+    k = np.arange(2000, 8001, 5).astype(float)
+    d1 = (np.log(S0 / k) + (R + SIGMA**2 / 2) * t) / (SIGMA * np.sqrt(t))
+    d2 = d1 - SIGMA * np.sqrt(t)
+    call = S0 * norm.cdf(d1) - k * np.exp(-R * t) * norm.cdf(d2)
+    put = k * np.exp(-R * t) * norm.cdf(-d2) - S0 * norm.cdf(-d1)
+
+    options = pd.DataFrame(
+        {
+            "strike": np.concatenate([k, k]),
+            "option_type": ["C"] * len(k) + ["P"] * len(k),
+            "mid_price": np.concatenate([call, put]),
+        }
+    )
+    options["bid"] = options["mid_price"]
+    options["ask"] = options["mid_price"]
+    return OptionChain(datetime(2026, 11, 1), days, S0, R, f, options)
+
+
+def test_compute_metrics_recovers_black_scholes_vol() -> None:
+    """With two Black-Scholes chains at 20 % vol, the 30-day VIX must be 20 % and the SVIX slightly above."""
+    metrics = VarianceCalculator().compute_metrics([_make_full_bs_chain(23), _make_full_bs_chain(37)])
+    assert metrics.maturity_days == 30
+    assert metrics.is_interpolated
+    assert metrics.vix_annualized == pytest.approx(SIGMA, rel=1e-3)
+    assert metrics.svix_annualized > metrics.vix_annualized
+
+
+def test_compute_metrics_chain_order_does_not_matter() -> None:
+    """Passing the chains in reverse order must give the same result."""
+    calc = VarianceCalculator()
+    a = calc.compute_metrics([_make_full_bs_chain(23), _make_full_bs_chain(37)])
+    b = calc.compute_metrics([_make_full_bs_chain(37), _make_full_bs_chain(23)])
+    assert a.vix_annualized == pytest.approx(b.vix_annualized)
+    assert a.svix_annualized == pytest.approx(b.svix_annualized)
+
+
+def test_compute_metrics_requires_two_chains() -> None:
+    """Anything other than exactly two chains must be rejected."""
+    with pytest.raises(ValueError, match="exactly 2 chains"):
+        VarianceCalculator().compute_metrics([_make_full_bs_chain(30)])
