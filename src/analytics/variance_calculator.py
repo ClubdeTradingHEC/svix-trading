@@ -5,7 +5,9 @@ Implements the Carr-Madan model-free replication for VIX and Ian Martin's (2017)
 
 from typing import List
 
+import numpy as np
 import pandas as pd
+from scipy.integrate import simpson
 
 from src.core.schemas import OptionChain, VolatilityMetrics
 
@@ -16,7 +18,8 @@ class VarianceCalculator:
     Handles Out-of-the-Money (OTM) filtration, numerical integration, and constant-maturity interpolation.
     """
 
-    def _isolate_otm_options(self, chain: OptionChain) -> pd.DataFrame:
+    @staticmethod
+    def _isolate_otm_options(chain: OptionChain) -> pd.DataFrame:
         """
         Splits the volatility surface at the forward price.
         Retains strictly Out-of-the-Money (OTM) puts (K < F) and OTM calls (K >= F).
@@ -27,11 +30,17 @@ class VarianceCalculator:
         Returns:
             pd.DataFrame: A sorted continuum of OTM options mapped by strike.
         """
-        raise NotImplementedError(
-            "Nelson: Filter the chain.options_data using chain.forward_price. Return a consolidated DataFrame sorted by strike."
-        )
+        options = chain.options_data
+        forward = chain.forward_price
 
-    def _integrate_variance(self, otm_surface: pd.DataFrame, chain: OptionChain, is_svix: bool) -> float:
+        otm_puts = options[(options["option_type"] == "P") & (options["strike"] < forward)]
+        otm_calls = options[(options["option_type"] == "C") & (options["strike"] >= forward)]
+
+        otm = pd.concat([otm_puts, otm_calls])
+        return otm.sort_values("strike").reset_index(drop=True)
+
+    @staticmethod
+    def _integrate_variance(otm_surface: pd.DataFrame, chain: OptionChain, is_svix: bool) -> float:
         """
         Performs the numerical integration over the OTM surface.
 
@@ -47,13 +56,26 @@ class VarianceCalculator:
         Returns:
             float: The raw, annualized variance for this specific maturity.
         """
-        raise NotImplementedError(
-            "Nelson: Implement numerical integration (e.g., using scipy.integrate.simpson). "
-            "Apply the correct discount factors and integration weights."
-        )
+        strikes = otm_surface["strike"].to_numpy()
+        prices = otm_surface["mid_price"].to_numpy()
 
+        s0 = chain.underlying_price
+        r = chain.risk_free_rate
+        t = chain.maturity_days / 365
+
+        if is_svix:
+            integrand = prices
+            factor = 2 / (t * np.exp(r * t) * s0**2)
+        else:
+            integrand = prices / strikes**2
+            factor = 2 * np.exp(r * t) / t
+
+        integral = simpson(integrand, x=strikes)
+        return factor * integral
+
+    @staticmethod
     def _interpolate_constant_maturity(
-        self, var_t1: float, days_t1: float, var_t2: float, days_t2: float, target_days: int = 30
+        var_t1: float, days_t1: float, var_t2: float, days_t2: float, target_days: int = 30
     ) -> float:
         """
         Applies time-weighted linear interpolation between two maturities to extract
@@ -69,7 +91,12 @@ class VarianceCalculator:
         Returns:
             float: The interpolated, annualized constant maturity variance.
         """
-        raise NotImplementedError("Nelson: Implement the standard time-weighted variance interpolation formula.")
+        if days_t2 == days_t1:
+            raise ValueError("days_t1 and days_t2 must differ to interpolate")
+        w1 = (days_t2 - target_days) / (days_t2 - days_t1)
+        w2 = (target_days - days_t1) / (days_t2 - days_t1)
+        total_variance = days_t1 * var_t1 * w1 + days_t2 * var_t2 * w2
+        return total_variance / target_days
 
     def compute_metrics(self, chains: List[OptionChain], target_days: int = 30) -> VolatilityMetrics:
         """
@@ -86,14 +113,40 @@ class VarianceCalculator:
         if len(chains) != 2:
             raise ValueError(f"Analytics constraint: Expected exactly 2 chains for interpolation, received {len(chains)}.")
 
-        # Architectural guidance for Nelson:
-        # 1. Sort the two chains by maturity (T1 = near term, T2 = next term).
-        # 2. For each chain:
-        #    a. Call _isolate_otm_options()
-        #    b. Call _integrate_variance() for VIX and for SVIX
-        #    c. Record the min/max strikes and number of integration points
-        # 3. Call _interpolate_constant_maturity() for both VIX and SVIX.
-        # 4. Extract macro state (underlying_price, risk_free_rate, dividend_yield) from the first chain.
-        # 5. Instantiate and return the VolatilityMetrics contract.
+        # 1. Sort the two chains by maturity (near = T1, far = T2)
+        near, far = sorted(chains, key=lambda chain: chain.maturity_days)
 
-        raise NotImplementedError("Nelson: Orchestrate the integration and interpolation here, then return VolatilityMetrics.")
+        # 2a. Keep only the OTM options of each chain
+        otm_near = self._isolate_otm_options(near)
+        otm_far = self._isolate_otm_options(far)
+
+        # 2b. Variance of each chain, for the VIX and for the SVIX
+        vix_near = self._integrate_variance(otm_near, near, is_svix=False)
+        vix_far = self._integrate_variance(otm_far, far, is_svix=False)
+        svix_near = self._integrate_variance(otm_near, near, is_svix=True)
+        svix_far = self._integrate_variance(otm_far, far, is_svix=True)
+
+        # 3. Bring both variances to the target maturity
+        vix_var = self._interpolate_constant_maturity(vix_near, near.maturity_days, vix_far, far.maturity_days, target_days)
+        svix_var = self._interpolate_constant_maturity(svix_near, near.maturity_days, svix_far, far.maturity_days, target_days)
+
+        if vix_var < 0 or svix_var < 0:
+            raise ValueError(f"Negative interpolated variance (VIX: {vix_var}, SVIX: {svix_var}).")
+
+        # 2c. Strike range and grid density actually used
+        all_strikes = pd.concat([otm_near["strike"], otm_far["strike"]])
+
+        # 4-5. Macro state from the near chain, then the VolatilityMetrics contract (volatilities, not variances)
+        return VolatilityMetrics(
+            date=near.date,
+            maturity_days=float(target_days),
+            is_interpolated=True,
+            underlying_price=near.underlying_price,
+            risk_free_rate=near.risk_free_rate,
+            dividend_yield=near.dividend_yield,
+            svix_annualized=float(np.sqrt(svix_var)),
+            vix_annualized=float(np.sqrt(vix_var)),
+            min_strike_used=float(all_strikes.min()),
+            max_strike_used=float(all_strikes.max()),
+            integration_points=min(len(otm_near), len(otm_far)),
+        )
