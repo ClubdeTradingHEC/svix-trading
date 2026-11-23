@@ -10,7 +10,7 @@ wheels/
 
 # Virtual environments
 .venv
-notebooks/.ipynb_checkpoints/
+.ipynb_checkpoints/
 
 # Environment variables (credentials)
 .env
