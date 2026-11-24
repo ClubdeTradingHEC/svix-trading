@@ -6,6 +6,8 @@ Ian Martin's (2017) SVIX risk premium bound.
 
 from typing import List
 
+import pandas as pd
+
 from src.core.schemas import TradeSignal, VolatilityMetrics
 
 
@@ -28,11 +30,9 @@ class SignalGenerator:
         Returns:
             float: The target allocation weight, strictly bounded between [-1.0, 1.0].
         """
-        raise NotImplementedError(
-            "Adam: Design the mapping function here. "
-            "Example: Scale the allocation proportionally to the premium bound. "
-            "Ensure the return value never breaches the [-1.0, 1.0] limits."
-        )
+        # Baseline allocation (k=1); scaling to be calibrated using historical SVIX data.
+        premium_bound = 0.5 * svix_annualized**2
+        return min(1.0, premium_bound)
 
     def generate_signals(self, metrics_history: List[VolatilityMetrics]) -> List[TradeSignal]:
         """
@@ -54,4 +54,22 @@ class SignalGenerator:
         # 4. Extract underlying_price, risk_free_rate, and dividend_yield from the metrics.
         # 5. Instantiate a TradeSignal for each date and append it to the results list.
 
-        raise NotImplementedError("Adam: Implement the time-series transformation and TradeSignal instantiation loop here.")
+        df = pd.DataFrame([vars(metrics) for metrics in metrics_history])
+        signals = []
+
+        for _, row in df.iterrows():
+            signal_date = row["date"]
+            execution_date = (pd.Timestamp(signal_date) + pd.offsets.BDay(1)).to_pydatetime()
+
+            signal = TradeSignal(
+                signal_date=signal_date,
+                target_execution_date=execution_date,
+                underlying_price_at_signal=row["underlying_price"],
+                target_weight=self._derive_target_weight(row["svix_annualized"]),
+                risk_free_rate=row["risk_free_rate"],
+                dividend_yield=row["dividend_yield"],
+            )
+
+            signals.append(signal)
+
+        return signals
